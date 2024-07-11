@@ -8,8 +8,8 @@ import (
 
 func main() {
 	var (
-		m             = miner{}
-		outputPath    string
+		m          = &miner{}
+		outputPath string
 	)
 
 	flag.StringVar(&m.url, "u", "", "url to extract parameters from.")

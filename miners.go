@@ -21,11 +21,7 @@ func (m *miner) mine() ([]string, error) {
 		contents string
 		err      error
 	)
-	// if m.crawlMode {
-	// 	contents, err = m.runCrawlMode()
-	// } else {
-	// 	contents, err = m.runRawMode()
-	// }
+
 	switch {
 	case m.directoryPath != "":
 		files, err := os.ReadDir(m.directoryPath)
