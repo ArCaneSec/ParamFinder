@@ -1,4 +1,4 @@
-module github.com/ArCaneSec/ParamFinder
+module github.com/ArCaneSec/paramfinder
 
 go 1.22.4
 

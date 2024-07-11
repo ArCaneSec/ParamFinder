@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -81,8 +82,10 @@ func (m *miner) runCrawlMode() (string, error) {
 	jsPaths := extractJsPath(htmlContent)
 	urls := make([]string, 0, len(jsPaths))
 
+	urlObj, _ := url.Parse(m.url)
 	for _, path := range jsPaths {
-		urls = append(urls, fmt.Sprintf("%s%s", m.url, path))
+		urlObj.Path = path
+		urls = append(urls, urlObj.String())
 	}
 
 	responses := make(chan string, len(urls))
@@ -114,7 +117,7 @@ func (m *miner) runCrawlMode() (string, error) {
 		packedBodies = append(packedBodies, res)
 	}
 
-	return strings.Join(packedBodies, ","), nil
+	return strings.Join(packedBodies, "\n"), nil
 }
 
 func (m *miner) runRawMode() (string, error) {

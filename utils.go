@@ -13,18 +13,18 @@ import (
 )
 
 func extractJsPath(html string) []string {
-	matches := jsFiles.FindAllString(html, -1)
+	matches := jsFiles.FindAllStringSubmatch(html, -1)
 
 	allPaths := make([]string, 0, len(matches))
 
 	for _, path := range matches {
 
 		// removing useless js files
-		if strings.Contains(path, "cdn") || strings.Contains(path, "jquery") {
+		if strings.Contains(path[1], "cdn") || strings.Contains(path[1], "jquery") {
 			continue
 		}
 
-		allPaths = append(allPaths, path)
+		allPaths = append(allPaths, path[1])
 	}
 
 	return allPaths
