@@ -3,48 +3,85 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 )
 
 type miner struct {
-	url       string
-	crawlMode bool
-	headless  bool
+	url           string
+	crawlMode     bool
+	headless      bool
+	silent        bool
+	directoryPath string
 }
 
-func (m *miner) mine() {
+func (m *miner) mine() ([]string, error) {
 	var (
 		contents string
-		err error
+		err      error
 	)
-	if m.crawlMode {
+	// if m.crawlMode {
+	// 	contents, err = m.runCrawlMode()
+	// } else {
+	// 	contents, err = m.runRawMode()
+	// }
+	switch {
+	case m.directoryPath != "":
+		files, err := os.ReadDir(m.directoryPath)
+		if err != nil {
+			return nil, fmt.Errorf("[!] Error while listing files in provided directory path: %w", err)
+		}
+
+		params := make(chan string, 10)
+		wg := &sync.WaitGroup{}
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				bytes, err := os.ReadFile(fmt.Sprintf("%s/%s", m.directoryPath, file.Name()))
+				if err != nil {
+					m.fLog(err)
+				}
+
+				fileParams := findAllParams(string(bytes))
+				for param := range fileParams {
+					params <- param
+				}
+			}()
+		}
+		go func() {
+			wg.Wait()
+			close(params)
+		}()
+
+		uniques, _ := uniqueParams(params)
+		return uniques, nil
+
+	case m.crawlMode:
 		contents, err = m.runCrawlMode()
-	} else {
+	default:
 		contents, err = m.runRawMode()
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	params, _ := findAllParams(contents)
+	params := findAllParams(contents)
+	uniques, _ := uniqueParams(params)
 
-	// loggingDone, err := logError(errors)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	mergedParams := merge(params)
-
-	uniques, _ := uniqueParams(mergedParams)
-	// <-loggingDone
-	fmt.Println(uniques)
+	return uniques, nil
 }
 
 func (m *miner) runCrawlMode() (string, error) {
-	log.Println("[*] Crawling mode...")
+	htmlContent, err := m.sendRequest()
+	if err != nil {
+		return "", err
+	}
 
-	htmlContent, _ := m.sendRequest()
 	jsPaths := extractJsPath(htmlContent)
 	urls := make([]string, 0, len(jsPaths))
 
@@ -53,7 +90,6 @@ func (m *miner) runCrawlMode() (string, error) {
 	}
 
 	responses := make(chan string, len(urls))
-	errors := make(chan error, len(urls))
 	wg := &sync.WaitGroup{}
 
 	for _, url := range urls {
@@ -64,7 +100,7 @@ func (m *miner) runCrawlMode() (string, error) {
 			res, err := rawRequest(url)
 
 			if err != nil {
-				errors <- err
+				m.log(fmt.Errorf("[!] Error while sending request to %s: %w", url, err))
 				return
 			}
 			responses <- res
@@ -73,7 +109,6 @@ func (m *miner) runCrawlMode() (string, error) {
 	go func() {
 		wg.Wait()
 		close(responses)
-		close(errors)
 	}()
 
 	var packedBodies []string
@@ -87,8 +122,12 @@ func (m *miner) runCrawlMode() (string, error) {
 }
 
 func (m *miner) runRawMode() (string, error) {
+	content, err := m.sendRequest()
+	if err != nil {
+		return "", err
+	}
 
-	return "", nil
+	return content, nil
 }
 
 func (m *miner) sendRequest() (string, error) {
@@ -96,4 +135,41 @@ func (m *miner) sendRequest() (string, error) {
 		return headlessRequest(m.url)
 	}
 	return rawRequest(m.url)
+}
+
+func findAllParams(html string) <-chan string {
+	params := make(chan string, 10)
+	var wg sync.WaitGroup
+
+	for _, pattern := range patterns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			for _, param := range pattern.FindAllStringSubmatch(html, -1) {
+				params <- param[1]
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+
+		close(params)
+	}()
+
+	return params
+}
+
+func (m *miner) log(v ...any) {
+	if !m.silent {
+		log.Println(v...)
+	}
+}
+
+// fatal log
+func (m *miner) fLog(v ...any) {
+	if !m.silent {
+		log.Fatalln(v...)
+	}
+	os.Exit(1)
 }
