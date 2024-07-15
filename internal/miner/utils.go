@@ -1,4 +1,4 @@
-package main
+package miner
 
 import (
 	"context"
@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
+	"github.com/ArCaneSec/paramfinder/internal/pattern"
+	"github.com/go-rod/rod"
 )
 
 func extractJsPath(html string) []string {
-	matches := jsFiles.FindAllStringSubmatch(html, -1)
+	matches := pattern.JsFiles.FindAllStringSubmatch(html, -1)
 
 	allPaths := make([]string, 0, len(matches))
 
@@ -30,8 +30,8 @@ func extractJsPath(html string) []string {
 	return allPaths
 }
 
-func rawRequest(url string) (string, error) {
-	client := http.Client{Timeout: 3 * time.Second}
+func rawRequest(url string, headers []string) (string, error) {
+	client := http.Client{Timeout: 10 * time.Second}
 	redirectCount := 0
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -56,6 +56,9 @@ func rawRequest(url string) (string, error) {
 		"Sec-Fetch-User":  {"?1"},
 		"Referer":         {url},
 	}
+	for i := 0; i < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -72,46 +75,30 @@ func rawRequest(url string) (string, error) {
 	return string(resBody), nil
 }
 
-func headlessRequest(url string) (string, error) {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("ignore-certificate-errors", true),
-		chromedp.Flag("disable-web-security", true),
-	)
-	aCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-
-	ctx, cancel := chromedp.NewContext(
-		aCtx,
-	)
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	defaultHeaders := map[string]interface{}{
-		"User-Agent":      "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/114.0",
-		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-		"Accept-Language": "en-US,en;q=0.5",
-		"Sec-Fetch-Dest":  "document",
-		"Sec-Fetch-Mode":  "navigate",
-		"Sec-Fetch-Site":  "none",
-		"Sec-Fetch-User":  "?1",
-		"Referer":         url,
-	}
-
-	var htmlContent string
-	err := chromedp.Run(ctx,
-		network.Enable(),
-		network.SetExtraHTTPHeaders(defaultHeaders),
-		chromedp.Navigate(url),
-		chromedp.WaitReady("body"),
-		chromedp.OuterHTML("html", &htmlContent),
-	)
+func headlessRequest(url string, headers []string) (string, error) {
+	page := rod.New().MustConnect().MustPage()
+	ctx, _ := context.WithTimeout(context.Background(), 15*time.Second)
+	page = page.Context(ctx)
+	_, err := page.SetExtraHeaders(headers)
 	if err != nil {
-		return "", fmt.Errorf("[!] Error while running headless browser, check your url and network then try again.\nurl: %s\nerror: %w", url, err)
+		return "", fmt.Errorf("headless: error setting custom headers: %w", err)
 	}
 
-	return htmlContent, nil
+	err = page.Navigate(url)
+	if err != nil {
+		return "", fmt.Errorf("headless: error while navigating: %w", err)
+	}
+
+	err = page.WaitLoad()
+	if err != nil {
+		return "", fmt.Errorf("headless: error while waiting for document load: %w", err)
+	}
+	content, err := page.HTML()
+	if err != nil {
+		return "", fmt.Errorf("headless: error fetching html content: %w", err)
+	}
+
+	return content, nil
 }
 
 func uniqueParams(params <-chan string) ([]string, map[string]int) {
